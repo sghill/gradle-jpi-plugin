@@ -1,0 +1,186 @@
+// Init script to trace Gradle task executions for Buildkite Test Insights
+// This script registers a BuildService that listens to task completion events
+// and writes span data to a JSON file.
+
+import org.gradle.build.event.BuildEventsListenerRegistry
+import org.gradle.api.services.BuildServiceRegistry
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
+import org.gradle.tooling.events.OperationCompletionListener
+import org.gradle.tooling.events.task.TaskFinishEvent
+
+class TaskTracingBuildServiceImpl implements BuildService<BuildServiceParameters.None>, OperationCompletionListener {
+    private final RegularFileProperty outputFile
+
+    TaskTracingBuildServiceImpl(RegularFileProperty outputFile) {
+        this.outputFile = outputFile
+    }
+
+    @Override
+    void onCompletion(TaskFinishEvent event) {
+        def file = outputFile.getAsFile().get()
+        file.parentFile.mkdirs()
+        writeSpan(event, file)
+    }
+
+    private synchronized void writeSpan(TaskFinishEvent event, File outputFile) {
+        def spans = readExistingSpans(outputFile)
+        def result = event.result
+        def span = [
+            id: UUID.randomUUID().toString(),
+            name: event.descriptor.name,
+            scope: event.descriptor.taskPath,
+            startAtSeconds: result.startTime / 1000.0,
+            endAtSeconds: result.endTime / 1000.0,
+            durationSeconds: (result.endTime - result.startTime) / 1000.0
+        ]
+        spans << span
+        outputFile.text = toJson(spans)
+    }
+
+    private List<Map<String, Object>> readExistingSpans(File outputFile) {
+        if (!outputFile.exists()) {
+            return []
+        }
+        def text = outputFile.text.trim()
+        if (text.isEmpty()) {
+            return []
+        }
+        return evaluateJsonArray(text)
+    }
+
+    private List<Map<String, Object>> evaluateJsonArray(String json) {
+        // Simple JSON array parser for task spans
+        def spans = []
+        def content = json.replaceAll(/^\s*\[/, '').replaceAll(/\]\s*$/, '').trim()
+        if (content.isEmpty()) {
+            return spans
+        }
+        
+        // Split by , but be careful about nested structures
+        def depth = 0
+        def current = new StringBuilder()
+        def spanStrings = []
+        
+        content.eachChar { c ->
+            if (c == '{') depth++
+            else if (c == '}') depth--
+            else if (c == ',' && depth == 0) {
+                spanStrings << current.toString().trim()
+                current = new StringBuilder()
+            } else {
+                current << c
+            }
+        }
+        if (current.length() > 0) {
+            spanStrings << current.toString().trim()
+        }
+        
+        for (spanStr in spanStrings) {
+            spans << parseSpan(spanStr)
+        }
+        return spans
+    }
+
+    private Map<String, Object> parseSpan(String spanStr) {
+        def result = [:]
+        def content = spanStr.replaceAll(/^\{/, '').replaceAll(/\}\s*$/, '').trim()
+        
+        // Parse key-value pairs
+        def depth = 0
+        def current = new StringBuilder()
+        def pairs = []
+        
+        content.eachChar { c ->
+            if (c == '{' || c == '[') depth++
+            else if (c == '}' || c == ']') depth--
+            else if (c == ',' && depth == 0) {
+                pairs << current.toString().trim()
+                current = new StringBuilder()
+            } else {
+                current << c
+            }
+        }
+        if (current.length() > 0) {
+            pairs << current.toString().trim()
+        }
+        
+        for (pair in pairs) {
+            def colonIdx = pair.indexOf(':')
+            if (colonIdx > 0) {
+                def key = pair.substring(0, colonIdx).trim().replaceAll(/^"|"$/, '')
+                def value = pair.substring(colonIdx + 1).trim()
+                result[key] = parseValue(value)
+            }
+        }
+        return result
+    }
+
+    private Object parseValue(String value) {
+        value = value.trim()
+        if (value == 'null') return null
+        if (value.startsWith('"') && value.endsWith('"')) {
+            return value.substring(1, value.length() - 1)
+        }
+        if (value == 'true') return true
+        if (value == 'false') return false
+        try {
+            if (value.contains('.')) {
+                return Double.parseDouble(value)
+            }
+            return Long.parseLong(value)
+        } catch (NumberFormatException e) {
+            return value
+        }
+    }
+
+    private String toJson(List<Map<String, Object>> spans) {
+        def sb = new StringBuilder()
+        sb << '[\n'
+        spans.eachWithIndex { span, i ->
+            sb << '  {\n'
+            sb << '    "id": "' << span.id << '",\n'
+            sb << '    "name": "' << escapeJson(span.name) << '",\n'
+            sb << '    "scope": "' << escapeJson(span.scope) << '",\n'
+            sb << '    "section": "annotation",\n'
+            sb << '    "startAtSeconds": ' << span.startAtSeconds << ',\n'
+            sb << '    "endAtSeconds": ' << span.endAtSeconds << ',\n'
+            sb << '    "durationSeconds": ' << span.durationSeconds << ',\n'
+            sb << '    "detail": {\n'
+            sb << '      "content": "' << escapeJson(span.scope) << '"\n'
+            sb << '    }\n'
+            sb << '  }'
+            if (i < spans.size() - 1) sb << ','
+            sb << '\n'
+        }
+        sb << ']'
+        return sb.toString()
+    }
+
+    private String escapeJson(String s) {
+        if (s == null) return ''
+        return s.replace('\\', '\\\\')
+                .replace('"', '\\"')
+                .replace('\n', '\\n')
+                .replace('\r', '\\r')
+                .replace('\t', '\\t')
+    }
+}
+
+// Register the build service and subscribe to task completion events
+def buildServices = services.get(BuildServiceRegistry)
+def listenerRegistry = services.get(BuildEventsListenerRegistry)
+
+// Output file for task spans - configurable via system property or use default in build directory
+def defaultOutputPath = new File(project.buildDir, "test-insights/task-spans.json").absolutePath
+def outputPath = System.getProperty("buildkite.task.tracing.output", defaultOutputPath)
+def outputFile = project.layout.file(project.file(outputPath))
+
+def registration = buildServices.registerIfAbsent(
+    "org.jenkinsci.gradle.plugins.jpi2.TaskTracingBuildService",
+    TaskTracingBuildServiceImpl,
+    { service -> service.outputFile.set(outputFile) }
+)
+
+listenerRegistry.onTaskCompletion(registration.serviceProvider)

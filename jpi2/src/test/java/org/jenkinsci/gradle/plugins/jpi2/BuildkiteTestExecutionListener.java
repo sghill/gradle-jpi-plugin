@@ -31,11 +31,15 @@ import java.util.regex.Pattern;
  * <p>This listener is automatically registered via JUnit Platform's service provider
  * mechanism. The output file can be overridden via the system property
  * {@code buildkite.test.insights.file} (defaults to {@code build/test-insights/test-insights.json}).
+ *
+ * <p>Task spans from GradleRunner sub-processes are read from the file specified by
+ * {@code buildkite.task.spans.file} system property and merged into the output.
  */
 public class BuildkiteTestExecutionListener implements TestExecutionListener {
 
     private static final String DEFAULT_OUTPUT_FILE = "build/test-insights/test-insights.json";
     private static final String SYSTEM_PROPERTY_FILE = "buildkite.test.insights.file";
+    private static final String SYSTEM_PROPERTY_TASK_SPANS_FILE = "buildkite.task.spans.file";
 
     // Pattern to extract class name from JUnit 5 uniqueId: [class:fully.qualified.ClassName]
     private static final Pattern CLASS_PATTERN = Pattern.compile("\\[class:([^\\]]+)\\]");
@@ -49,6 +53,7 @@ public class BuildkiteTestExecutionListener implements TestExecutionListener {
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
     private Instant executionStartTime;
     private Path outputFile;
+    private List<TaskSpan> taskSpans = new ArrayList<>();
 
     @Override
     public void testPlanExecutionStarted(org.junit.platform.launcher.TestPlan testPlan) {
@@ -97,7 +102,28 @@ public class BuildkiteTestExecutionListener implements TestExecutionListener {
 
     @Override
     public void testPlanExecutionFinished(org.junit.platform.launcher.TestPlan testPlan) {
+        readTaskSpans();
         writeResults();
+    }
+
+    private void readTaskSpans() {
+        String taskSpansFilePath = System.getProperty(SYSTEM_PROPERTY_TASK_SPANS_FILE);
+        if (taskSpansFilePath == null || taskSpansFilePath.isEmpty()) {
+            return;
+        }
+
+        Path taskSpansFile = Path.of(taskSpansFilePath);
+        if (!Files.exists(taskSpansFile)) {
+            return;
+        }
+
+        try {
+            var mapper = new ObjectMapper();
+            var type = mapper.getTypeFactory().constructCollectionType(List.class, TaskSpan.class);
+            taskSpans = mapper.readValue(taskSpansFile.toFile(), type);
+        } catch (IOException e) {
+            System.err.println("Warning: Failed to read task spans from " + taskSpansFilePath + ": " + e.getMessage());
+        }
     }
 
     private Path determineOutputFile() {
@@ -193,7 +219,21 @@ public class BuildkiteTestExecutionListener implements TestExecutionListener {
     }
 
     private void writeResults() {
-        List<TestResult> resultsToWrite = new ArrayList<>(testResults);
+        List<Object> resultsToWrite = new ArrayList<>(testResults);
+        // Convert task spans to TestResult format and add them
+        for (TaskSpan span : taskSpans) {
+            History history = new History(span.startAtSeconds, span.endAtSeconds, span.durationSeconds);
+            TestResult taskResult = new TestResult(
+                    span.id,
+                    span.name,
+                    span.scope,
+                    "", // location - not available for Gradle tasks
+                    "", // fileName - not available for Gradle tasks
+                    "passed", // Gradle tasks are assumed passed if they completed
+                    "", // failureReason - not available for Gradle tasks
+                    history);
+            resultsToWrite.add(taskResult);
+        }
 
         try {
             objectMapper.writeValue(outputFile.toFile(), resultsToWrite);
@@ -261,5 +301,34 @@ public class BuildkiteTestExecutionListener implements TestExecutionListener {
         double startAtNanos;
         double endAtNanos;
         double durationSeconds;
+    }
+
+    /**
+     * Represents a task span captured from GradleRunner sub-processes.
+     */
+    public static class TaskSpan {
+        private final String id;
+        private final String name;
+        private final String scope;
+        private final double startAtSeconds;
+        private final double endAtSeconds;
+        private final double durationSeconds;
+
+        public TaskSpan(String id, String name, String scope, double startAtSeconds,
+                       double endAtSeconds, double durationSeconds) {
+            this.id = id;
+            this.name = name;
+            this.scope = scope;
+            this.startAtSeconds = startAtSeconds;
+            this.endAtSeconds = endAtSeconds;
+            this.durationSeconds = durationSeconds;
+        }
+
+        public String getId() { return id; }
+        public String getName() { return name; }
+        public String getScope() { return scope; }
+        public double getStartAtSeconds() { return startAtSeconds; }
+        public double getEndAtSeconds() { return endAtSeconds; }
+        public double getDurationSeconds() { return durationSeconds; }
     }
 }
