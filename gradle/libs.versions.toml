@@ -6,6 +6,7 @@ commons-io = "2.22.0"
 commons-text = "1.15.0"
 develocity-testing-annotations = "2.0.1"
 guava = "31.1-jre"
+jackson-databind = "2.18.3"
 javapoet = "1.13.0"
 jenkins = "2.566"
 jenkins-test-harness = "2571.v70e084e8616c"
@@ -30,6 +31,7 @@ commons-io = { module = "commons-io:commons-io", version.ref = "commons-io" }
 commons-text = { module = "org.apache.commons:commons-text", version.ref = "commons-text" }
 develocity-testing-annotations = { module = "com.gradle:develocity-testing-annotations", version.ref = "develocity-testing-annotations" }
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson-databind" }
 javapoet = { module = "com.squareup:javapoet", version.ref = "javapoet" }
 jenkins-core = { module = "org.jenkins-ci.main:jenkins-core", version.ref = "jenkins" }
 jenkins-test-harness = { module = "org.jenkins-ci.main:jenkins-test-harness", version.ref = "jenkins-test-harness" }
@@ -39,7 +41,7 @@ junit4 = { module = "junit:junit", version.ref = "junit4" }
 junit5-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit5" }
 junit5-bom = { module = "org.junit:junit-bom", version.ref = "junit5" }
 junit5-jupiter = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit5" }
-junit5-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+junit5-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit5" }
 junit5-vintage = { module = "org.junit.vintage:junit-vintage-engine", version.ref = "junit5" }
 localizer-maven = { module = "org.jvnet.localizer:localizer-maven-plugin", version.ref = "localizer" }
 maven-model = { module = "org.apache.maven:maven-model", version.ref = "maven" }
