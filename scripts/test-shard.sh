@@ -11,7 +11,7 @@
 #   TOTAL_SHARDS     - Total number of shards
 #   MAX_WORKERS      - Max Gradle workers per shard
 #   JPI2_MODULE      - Module path (default: jpi2)
-#   TEST_FILTER      - Test filter pattern (default: *IntegrationTest)
+#   TEST_FILTER      - Test filter pattern (default: *)
 #   COMBINE_RESULTS  - If "true", copies test results to combined directory
 #   BUILD_DIR        - Gradle build directory (default: jpi2/build)
 #
@@ -58,7 +58,7 @@ parse_args() {
                 echo "  --total-shards N   Total number of shards"
                 echo "  --max-workers N    Max Gradle workers per shard"
                 echo "  --jpi2-module P    Module path (default: jpi2)"
-                echo "  --test-filter F    Test filter pattern (default: *IntegrationTest)"
+                echo "  --test-filter F    Test filter pattern (default: *)"
                 echo "  --combine-results B Copy results to combined directory"
                 exit 0
                 ;;
@@ -75,7 +75,7 @@ SHARD_INDEX="${SHARD_INDEX:-}"
 TOTAL_SHARDS="${TOTAL_SHARDS:-}"
 MAX_WORKERS="${MAX_WORKERS:-4}"
 JPI2_MODULE="${JPI2_MODULE:-jpi2}"
-TEST_FILTER="${TEST_FILTER:-*IntegrationTest}"
+TEST_FILTER="${TEST_FILTER:-*}"
 COMBINE_RESULTS="${COMBINE_RESULTS:-false}"
 BUILD_DIR="${BUILD_DIR:-$JPI2_MODULE/build}"
 
