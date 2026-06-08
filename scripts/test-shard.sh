@@ -186,11 +186,11 @@ main() {
     echo ""
     
     # Run tests with filtering
-    if "${gradle_cmd[@]}" 2>&1; then
-        echo "Tests passed"
-    else
+    if ! "${gradle_cmd[@]}" 2>&1; then
         echo "Tests failed"
+        exit 1
     fi
+    echo "Tests passed"
     
     # Copy results to shard directory for later aggregation
     if [[ -d "$combined_results_dir" ]]; then
